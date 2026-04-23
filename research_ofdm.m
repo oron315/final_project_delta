@@ -23,7 +23,11 @@ fs = 10e6;
 scs = 15e3;
 T_sym = 1/scs;
 
+M = 4;
+nfft = 1024; % Number of FFT points
+Ncp = 72; % Cyclic prefix length
 
+% ----------- basic plots ------------ %
 f = -fs/2:fs/length(complex_data):fs/2 - fs/length(complex_data);
 t = 0:1/fs:length(complex_data)/fs-1/fs;
 
@@ -39,23 +43,14 @@ spectrogram(complex_data)
 figure;
 plot(real(complex_data),imag(complex_data))
 
-% ----------------------------------------------------%
+% ---------------resample and stating to proccess the data---------------------%
 
 data_upsample = resample(complex_data,1536,1000);
 data_upsample = data_upsample.';
 fs = 1024 * scs;
 
-f = -fs/2:fs/length(data_upsample):fs/2 - fs/length(data_upsample);
-t = 0:1/fs:length(data_upsample)/fs-1/fs;
 
-
-% 5. Perform OFDM demodulation
-M = 4;
-nfft = 1024; % Number of FFT points
-cplen = [72 80]; % Cyclic prefix length
-
-
-% create zadof chu
+% ---------create zadof chu------- %
 Nzc = 601;
 
 root = 600;
@@ -67,8 +62,6 @@ seq_6 = zadof_ofdm(Nzc,root);
 
 
 % -----------sync time--------------%
-Ncp = 72;
-
 
 sync_time = conv(data_upsample, flip(conj(seq_4)), "valid");
 
@@ -92,22 +85,21 @@ t = 0:1/fs:length(sync_data)/fs-1/fs;
 [~,sync_freq_idx] = max(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))));
 [~,sync_freq_idx] = max(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))));
 
-sync_freq = f(sync_freq_idx)
+sync_freq_big = f(sync_freq_idx); % big freq offset
 
-
+% finding out that the freq offset is less than sub carrier spacing freq
 figure;
 plot(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))))
 
 figure;
 plot(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))))
 
+% -----------correcting soft freq-------------- %
+sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp)).*conj(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp)))))*scs/(2*pi*2)
 
-sync_freq = angle(sum(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp)))*sum(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))*scs/(2*pi*2)
+sync_freq_data = sync_data .* exp(-1j*2*pi*(sync_freq_soft).*t);
 
-% sync_freq = 0;
-sync_freq_data = sync_data .* exp(-1j*2*pi*(sync_freq).*t);
-
-% demod ofdm
+% ---------demod ofdm to qpsk symbols---------- %
 
 sync_freq_data_first_ofdm = sync_freq_data(1:nfft);
 sync_freq_data_last_ofdm = sync_freq_data((nfft+Ncp)*8+8+1:(nfft+Ncp)*9+8-Ncp);
@@ -125,22 +117,28 @@ symbols_mat = fft(sync_data_mat);
 symbols = reshape(symbols_mat,1,[]);
 
 
-
 figure;
-scatter(real(symbols),imag(symbols))
-
-figure;
-spectrogram(symbols,kaiser(1024,18),1000,1024,fs,"reassigned","yaxis")
+scatter(real(symbols(1024*7+1:1024*8)),imag(symbols(1024*7+1:1024*8)))
 
 
-% grid = reshape(filtered_data,nfft+Ncp,[]);
+% ----- fix time again ------%
 
-% data__first_ofdm
-
-% % 7. Reshape the filtered data for OFDM demodulation
-% numSymbols = length(filtered_data) / (nfft + cplen(1));
-% reshaped_data = reshape(filtered_data(1:numSymbols*(nfft + cplen(1))), nfft + cplen(1), numSymbols);
+% t = 0:1/fs:length(data_upsample)/fs-1/fs;
+% data_upsample_fix_freq = data_upsample.* exp(-1j*2*pi*(sync_freq).*t);
 % 
+% sync_time = conv(data_upsample, flip(conj(seq_4)), "valid");
+% 
+% [~,max_sync_time] = max(sync_time);
+% 
+% sync_data = data_upsample(max_sync_time-3*(1024+Ncp)-8:max_sync_time+6*(1024+Ncp)+8);
+% 
+% figure;
+% plot(abs(sync_time))
+% 
+% figure;
+% plot(t,abs(sync_data))
+
+
 
 
 function seq_freq = zadof_ofdm(Nzc,root)
