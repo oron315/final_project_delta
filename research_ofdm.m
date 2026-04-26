@@ -26,6 +26,7 @@ T_sym = 1/scs;
 M = 4;
 nfft = 1024; % Number of FFT points
 Ncp = 72; % Cyclic prefix length
+Ncp_prime = 80;
 
 % ----------- basic plots ------------ %
 f = -fs/2:fs/length(complex_data):fs/2 - fs/length(complex_data);
@@ -47,7 +48,12 @@ plot(real(complex_data),imag(complex_data))
 
 data_upsample = resample(complex_data,1536,1000);
 data_upsample = data_upsample.';
-fs = 1024 * scs;
+fs = nfft * scs;
+
+
+
+% % ------------------ trying to padd with zeros --------------------- %
+% data_upsample = [zeros(), fft(complex_data),zeros()]
 
 
 % ---------create zadof chu------- %
@@ -63,80 +69,87 @@ seq_6 = zadof_ofdm(Nzc,root);
 
 % -----------sync time--------------%
 
-sync_time = conv(data_upsample, flip(conj(seq_4)), "valid");
+sync_time_4 = conv(data_upsample, flip(conj(seq_4)), "valid");
 
-[~,max_sync_time] = max(sync_time);
+sync_time_6 = conv(data_upsample, flip(conj(seq_6)), "valid");
 
-sync_data = data_upsample(max_sync_time-3*(1024+Ncp)-8:max_sync_time+6*(1024+Ncp)+8);
+[~,max_sync_time_4] = max(sync_time_4);
+[~,max_sync_time_6] = max(sync_time_6);
+
+% sync_data = data_upsample(max_sync_time-3*(nfft+Ncp)-8:max_sync_time+6*(nfft+Ncp)+8);
+sync_data = data_upsample(max_sync_time_4-3*(nfft+Ncp)-Ncp_prime:max_sync_time_4+6*nfft+4*Ncp+Ncp_prime);
 
 t = 0:1/fs:length(sync_data)/fs-1/fs;
 
 figure;
-plot(abs(sync_time))
+plot(abs(sync_time_4))
+title('The correlation of zadoff chu 4')
+figure;
+plot(abs(sync_time_6))
+title('The correlation of zadoff chu 6')
 
 figure;
 plot(t,abs(sync_data))
 
 % -----------sync freq--------------%
-f = -fs/2:fs/1024:fs/2 - fs/1024;
-t = 0:1/fs:length(sync_data)/fs-1/fs;
-
-
-[~,sync_freq_idx] = max(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))));
-[~,sync_freq_idx] = max(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))));
-
-sync_freq_big = f(sync_freq_idx); % big freq offset
-
-% finding out that the freq offset is less than sub carrier spacing freq
-figure;
-plot(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))))
-
-figure;
-plot(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))))
+% f = -fs/2:fs/nfft:fs/2 - fs/nfft;
+% t = 0:1/fs:length(sync_data)/fs-1/fs;
+% 
+% 
+% [~,sync_freq_idx] = max(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))));
+% [~,sync_freq_idx] = max(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))));
+% 
+% sync_freq_big = f(sync_freq_idx); % big freq offset
+% 
+% % finding out that the freq offset is less than sub carrier spacing freq
+% figure;
+% plot(abs(fftshift(fft(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp))))))
+% 
+% figure;
+% plot(abs(fftshift(fft(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp))))))
 
 % -----------correcting soft freq-------------- %
-sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((1024+Ncp)*5+8+1:(1024+Ncp)*6+8-Ncp)).*conj(seq_4 .* conj(sync_data((1024+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp)))))*scs/(2*pi*2)
+% sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((nfft+Ncp)*5+8+1:(nfft+Ncp)*6+8-Ncp)).*conj(seq_4 .* conj(sync_data((nfft+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp)))))*scs/(2*pi*2)
+
+
+sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((nfft+Ncp)*5+Ncp_prime+1:(nfft+Ncp)*5+Ncp_prime+nfft).*conj(seq_4 .* conj(sync_data((nfft+Ncp)*3+Ncp_prime+1:(nfft+Ncp)*3+nfft+Ncp_prime))))))*scs/(2*pi*2)
+% sync_freq_soft_better = diff(angle(seq_6 .* conj(sync_data((nfft+Ncp)*5+8+1:(nfft+Ncp)*6+8-Ncp))))*fs/(2*pi);
+
 
 sync_freq_data = sync_data .* exp(-1j*2*pi*(sync_freq_soft).*t);
 
 % ---------demod ofdm to qpsk symbols---------- %
 
-sync_freq_data_first_ofdm = sync_freq_data(1:nfft);
-sync_freq_data_last_ofdm = sync_freq_data((nfft+Ncp)*8+8+1:(nfft+Ncp)*9+8-Ncp);
+% ------ remove cp ----------%
+sync_freq_data_first_ofdm = sync_freq_data(Ncp_prime+1:nfft+Ncp_prime);
+sync_freq_data_last_ofdm = sync_freq_data(nfft*8+Ncp*9+8*2+1:nfft*9+Ncp*9+8*2);
 
-sync_data_middle = reshape(sync_freq_data(nfft+Ncp+8:(nfft+Ncp)*8+8-1),Ncp+nfft,[]);
+sync_data_middle = reshape(sync_freq_data(nfft+Ncp_prime+1:nfft*8+Ncp*8+8),Ncp+nfft,[]);
 
 
-sync_data_middle_mat = sync_data_middle(1:nfft,:);
+sync_data_middle_mat = sync_data_middle(Ncp+1:nfft+Ncp,:);
 
 sync_data_mat = [sync_freq_data_first_ofdm.',sync_data_middle_mat,sync_freq_data_last_ofdm.'];
 
+% --------------------------- %
 
-symbols_mat = fft(sync_data_mat);
+symbols_mat = fftshift(fft(sync_data_mat));
 
 symbols = reshape(symbols_mat,1,[]);
 
 
 figure;
-scatter(real(symbols(1024*7+1:1024*8)),imag(symbols(1024*7+1:1024*8)))
+scatter(real(symbols_mat(213:813,[2,3,5,7,9])),imag(symbols_mat(213:813,[2,3,5,7,9])))
 
 
-% ----- fix time again ------%
+figure;
+plot(abs(symbols_mat(:,5)))
 
-% t = 0:1/fs:length(data_upsample)/fs-1/fs;
-% data_upsample_fix_freq = data_upsample.* exp(-1j*2*pi*(sync_freq).*t);
-% 
-% sync_time = conv(data_upsample, flip(conj(seq_4)), "valid");
-% 
-% [~,max_sync_time] = max(sync_time);
-% 
-% sync_data = data_upsample(max_sync_time-3*(1024+Ncp)-8:max_sync_time+6*(1024+Ncp)+8);
-% 
-% figure;
-% plot(abs(sync_time))
-% 
-% figure;
-% plot(t,abs(sync_data))
+
+
+% ----- fix phase ------%
+
+
 
 
 
@@ -151,6 +164,4 @@ function seq_freq = zadof_ofdm(Nzc,root)
    seq_freq = ifft(ifftshift(seq));
 
 end
-
-
 
