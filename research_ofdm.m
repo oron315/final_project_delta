@@ -23,7 +23,7 @@ fs = 10e6;
 scs = 15e3;
 T_sym = 1/scs;
 
-M = 4;
+
 nfft = 1024; % Number of FFT points
 Ncp = 72; % Cyclic prefix length
 Ncp_prime = 80;
@@ -45,15 +45,11 @@ figure;
 plot(real(complex_data),imag(complex_data))
 
 % ---------------resample and stating to proccess the data---------------------%
+scale = 2;
+data_upsample = resample(complex_data,1536,1000);                  
 
-data_upsample = resample(complex_data,1536,1000);
 data_upsample = data_upsample.';
 fs = nfft * scs;
-
-
-
-% % ------------------ trying to padd with zeros --------------------- %
-% data_upsample = [zeros(), fft(complex_data),zeros()]
 
 
 % ---------create zadof chu------- %
@@ -112,9 +108,10 @@ plot(t,abs(sync_data))
 % sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((nfft+Ncp)*5+8+1:(nfft+Ncp)*6+8-Ncp)).*conj(seq_4 .* conj(sync_data((nfft+Ncp)*3+8+1:(1024+Ncp)*4+8-Ncp)))))*scs/(2*pi*2)
 
 
-sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((nfft+Ncp)*5+Ncp_prime+1:(nfft+Ncp)*5+Ncp_prime+nfft).*conj(seq_4 .* conj(sync_data((nfft+Ncp)*3+Ncp_prime+1:(nfft+Ncp)*3+nfft+Ncp_prime))))))*scs/(2*pi*2)
+sync_freq_soft = angle(mean(seq_6 .* conj(sync_data((nfft+Ncp)*5+Ncp_prime+1:(nfft+Ncp)*5+Ncp_prime+nfft).*conj(seq_4 .* conj(sync_data((nfft+Ncp)*3+Ncp_prime+1:(nfft+Ncp)*3+nfft+Ncp_prime))))))*scs/(2*pi*2);
 % sync_freq_soft_better = diff(angle(seq_6 .* conj(sync_data((nfft+Ncp)*5+8+1:(nfft+Ncp)*6+8-Ncp))))*fs/(2*pi);
 
+% sync_freq_soft = -2300;
 
 sync_freq_data = sync_data .* exp(-1j*2*pi*(sync_freq_soft).*t);
 
@@ -145,23 +142,43 @@ scatter(real(symbols_mat(213:813,[2,3,5,7,9])),imag(symbols_mat(213:813,[2,3,5,7
 figure;
 plot(abs(symbols_mat(:,5)))
 
-
+% ----- fix time once more ------%
+% t = 0:1/fs:length(data_upsample)/fs-1/fs;
+% 
+% data_fixed_freq = data_upsample .* exp(-1j*2*pi*(sync_freq_soft).*t);
+% 
+% sync_time_4 = conv(data_fixed_freq, flip(conj(seq_4)), "valid");
+% 
+% sync_time_6 = conv(data_fixed_freq, flip(conj(seq_6)), "valid");
+% 
+% [~,max_sync_time_4] = max(sync_time_4);
+% [~,max_sync_time_6] = max(sync_time_6);
+% 
+% % sync_data = data_upsample(max_sync_time-3*(nfft+Ncp)-8:max_sync_time+6*(nfft+Ncp)+8);
+% % sync_data = data_fixed_freq(max_sync_time_4-3*(nfft+Ncp)-Ncp_prime:max_sync_time_4+6*nfft+4*Ncp+Ncp_prime);
+% 
+% figure;
+% plot(abs(sync_time_4))
+% title('The correlation of zadoff chu 4 after fixed freq')
+% figure;
+% plot(abs(sync_time_6))
+% title('The correlation of zadoff chu 6 after fixed freq')
 
 % ----- fix phase ------%
 
 
 
 
-
-
 function seq_freq = zadof_ofdm(Nzc,root)
     
-    m = 0:Nzc-1;
+    m = 0:(Nzc-1);
     seq = exp((-1j*pi*root*m.*(m+1)/Nzc));
 
-   seq = [zeros(1,212),seq,zeros(1,1024-813)];
+   seq = [zeros(1,212),seq,zeros(1,(1024-813))];
   
    seq_freq = ifft(ifftshift(seq));
+
+   % seq_freq = resample(seq_freq,scale,1);
 
 end
 
