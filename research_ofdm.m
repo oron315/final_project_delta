@@ -3,7 +3,7 @@ clear
 clc
 
 %% ----------Open the file----------%
-filename = 'raw_samples_12_Feb_2026_09_30_39_442_fs_10MHz.32fc';
+filename = 'raw_samples_12_Feb_2026_09_30_50_921_fs_10MHz.32fc';
 fid = fopen(filename, 'r');
 
 % Read the data as 32-bit floats
@@ -57,6 +57,7 @@ seq_6 = zadof_ofdm(Nzc,root);
 sync_time_4 = conv(data_upsample, flip(conj(seq_4)), "valid");
 
 sync_time_6 = conv(data_upsample, flip(conj(seq_6)), "valid");
+
 
 [~,max_sync_time_4] = max(sync_time_4);
 [~,max_sync_time_6] = max(sync_time_6);
@@ -166,7 +167,7 @@ end
 function freq_offset = cp(packet, Ncp,Ncp_prime,fs)
    
     nfft = 1024;
-    sync_data_middle = reshape(packet(nfft+Ncp_prime+1:nfft*8+Ncp*8+8),Ncp+nfft,[]);
+    sync_data_middle = reshape(packet(nfft+Ncp_prime+1:nfft*8+Ncp*7+Ncp_prime),Ncp+nfft,[]);
 
     cps_start = sync_data_middle(1:Ncp,:);
 
@@ -183,24 +184,23 @@ function freq_offset = cp(packet, Ncp,Ncp_prime,fs)
     avg = angle(mean(match(20:50,:),"all"));
 
     freq_offset = avg*fs/(2*pi*1096);
-
 end
 
 
 function phase_offset = find_phase_offset(zadof,pilot,fs)
-    
+        
+    % zadof meaning the real zadof chu and pilot is the symbol in the
+    % packet with that zadof chu
     phase_offset = angle(mean(conj(zadof) .* pilot));
     
 end
 
-
-
-function H_est = estimate_channel(zadof,pilot)
-
-    H = pilot .* zadof.';
-    H_est = movmean(H,64,'Endpoints','shrink');
-end
-
+% 
+% function H_est = estimate_channel(zadof,pilot)
+% 
+%     H = pilot .* zadof.';
+%     H_est = movmean(H,64,'Endpoints','shrink');
+% end
 
 
 
@@ -251,10 +251,10 @@ function ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
     
     sync_data_mat = [sync_freq_data_first_ofdm.',sync_data_middle_mat,sync_freq_data_last_ofdm.'];
     
-    symbols_mat = fftshift(fft(sync_data_mat));
+    symbols_mat = fftshift(fft(sync_data_mat),1);
   
     figure;
-    scatter(real(symbols_mat(213:813,[2,3,5,7,9])),imag(symbols_mat(213:813,[2,3,5,7,9])))
+    scatter(real(symbols_mat(213:813,[2,3,5,6,7,9])),imag(symbols_mat(213:813,[2,3,5,6,7,9])))
     title("constellation QPSK")
 
     phase_offset = find_phase_offset(zadof,sym_6,fs);
@@ -266,16 +266,19 @@ function ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
     scatter(real(symbols_mat(213:813,[2,3,5,7,9])),imag(symbols_mat(213:813,[2,3,5,7,9])))
 
     figure;
-    plot(abs(ifftshift(ifft((symbols_mat(:,3).^4).'))))
+    plot(abs(fftshift(fft((symbols_mat(:,3).^4).'))))
 
-    % --------- fixing channel ---------- %
+    
+    %--------- fixing channel ---------- %
 
-    H_est = estimate_channel(symbols_mat(:,6),fftshift(fft(zadof)));
+    % H_est = estimate_channel(symbols_mat(:,6),fftshift(fft(zadof)));
 
 
-    fixed_symbols_mat = (symbols_mat ./ H_est.');
+    h = (symbols_mat(:,6) ./ fftshift(fft(zadof)).');
+
+    fixed_symbols_mat = symbols_mat ./ repmat(h,1,9);
 
     figure;
-    scatter(real(fixed_symbols_mat(213:813,[2,3,5,7,9])),imag(fixed_symbols_mat(213:813,[2,3,5,7,9])))
+    scatter(real(fixed_symbols_mat(213:813,[2,3,5,7,8,9])),imag(fixed_symbols_mat(213:813,[2,3,5,7,8,9])))
 
 end
