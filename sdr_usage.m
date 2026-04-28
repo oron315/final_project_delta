@@ -32,6 +32,8 @@ seq_6 = zadof_ofdm(Nzc,root,scale);
 fc = fc_list(1);
 fs = 15.36e6;
 
+% fc = 98e6;
+% fs = 20e6;
 % taking 2 packets in time
 time2packets = packet_time * 2 + time_between_packets;
 
@@ -114,7 +116,8 @@ function data1 = capture_samples(fc,fs,measure_time)
                   DecimationFactor =1);
     
     
-    
+    rx.ReceiveAntennaPort = 'TX/RX';
+    rx.Gain = 50;
     [data,metadata]= capture(rx,measure_time,"Seconds");
     
     data = double(data);
