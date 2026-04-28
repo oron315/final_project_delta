@@ -19,23 +19,23 @@ fc_list = 1e9 * [2.3995, 2.4145,2.4295,2.4445,2.4595, 5.7965,5.7765, 5.7565];
 
 %% ---------create zadof chu------- %
 Nzc = 601;
-scale = 1;
+
 
 root = 600;
-seq_4 = zadof_ofdm(Nzc,root,scale);
+seq_4 = zadof_ofdm(Nzc,root);
 
 root = 147;
-seq_6 = zadof_ofdm(Nzc,root,scale);
+seq_6 = zadof_ofdm(Nzc,root);
 
 %% ---------- system test 1 channel only----------- %
 
-fc = fc_list(1);
+fc = fc_list(3);
 fs = 15.36e6;
 
 % fc = 98e6;
-% fs = 20e6;
+% fs = 15.36e6;
 % taking 2 packets in time
-time2packets = packet_time * 2 + time_between_packets;
+time2packets = 5*(packet_time * 2 + time_between_packets);
 
 % -------- sampling using SDR --------- %
 
@@ -50,6 +50,7 @@ while ~is_packet
     [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time2packets,N_packet,nfft,Ncp,seq_4);
 end
 
+% [is_packet,data,max_idx_sync_time_4,rx,scope] = process_1_channel(fc,fs,time2packets,N_packet,nfft,Ncp,seq_4);
 % taking only the packet from the data
 sync_data = data(max_idx_sync_time_4-3*(nfft+Ncp(1))-Ncp(2):max_idx_sync_time_4+6*nfft+4*Ncp(1)+Ncp(2));
 
@@ -72,7 +73,7 @@ function [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time2pac
     % returns boolean of there is a packet there and it is not to late or
     % early
 
-    data = capture_samples(fc,fs,time2packets);
+    [data] = capture_samples(fc,fs,time2packets);
     
     [found_pilot,max_idx_sync_time_4] = find_pilot(data,seq_4);
 
@@ -98,7 +99,7 @@ function [found_pilot,max_idx_sync_time_4] = find_pilot(data,seq_4)
     % Calculate the peak to average ratio (PAR)
     par = (max_corr_4 / mean(abs(data)));
 
-    if par > length(seq_4)
+    if abs(par) > length(seq_4)
         found_pilot = 1;
     end
     
@@ -106,7 +107,7 @@ end
 
 %% Sampling using the SDR
 
-function data1 = capture_samples(fc,fs,measure_time)
+function [data1] = capture_samples(fc,fs,measure_time)
 
     rx = comm.SDRuReceiver(...
                   Platform ="B210", ...
@@ -117,14 +118,14 @@ function data1 = capture_samples(fc,fs,measure_time)
     
     
     rx.ReceiveAntennaPort = 'TX/RX';
-    rx.Gain = 50;
+    rx.Gain = 20;
     [data,metadata]= capture(rx,measure_time,"Seconds");
     
     data = double(data);
     
     data1 = data ./(2^15);
     
-    % spectrogram(data1);
+    spectrogram(data1);
     % 
     % sampleRate = rx.MasterClockRate/rx.DecimationFactor;
     % scope = spectrumAnalyzer(SampleRate=sampleRate);
@@ -134,7 +135,7 @@ function data1 = capture_samples(fc,fs,measure_time)
 end
 
 %% creating zadof chu as an OFDM symbol
-function seq_freq = zadof_ofdm(Nzc,root,scale)
+function seq_freq = zadof_ofdm(Nzc,root)
     
     m = 0:(Nzc-1);
     seq = exp((-1j*pi*root*m.*(m+1)/Nzc));
@@ -143,7 +144,7 @@ function seq_freq = zadof_ofdm(Nzc,root,scale)
   
     seq_freq = ifft(ifftshift(seq));
 
-    seq_freq = resample(seq_freq,scale,1);
+    % seq_freq = resample(seq_freq,scale,1);
 
 end
 
@@ -260,3 +261,28 @@ end
 %     end
 % 
 % end
+
+
+
+%% viewing real time spectrum analyzer
+% rx = comm.SDRuReceiver(...
+%               Platform ="B210", ...
+%               SerialNum ="3591273", ...
+%               CenterFrequency =fc, ...
+%               MasterClockRate =fs, ...
+%               DecimationFactor =1);
+% 
+% 
+% rx.ReceiveAntennaPort = 'TX/RX';
+% rx.Gain = 50;
+% 
+% specAnalyzer = spectrumAnalyzer('SampleRate',fs);
+% 
+% for i=1:100000
+%     [data,len] = rx();
+%     % [data,metadata]= capture(rx,1,"Seconds");
+%     specAnalyzer(data);
+% end
+% 
+% release(rx);
+% release(specAnalyzer);
