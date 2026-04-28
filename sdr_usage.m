@@ -35,7 +35,7 @@ fs = 15.36e6;
 % fc = 98e6;
 % fs = 15.36e6;
 % taking 2 packets in time
-time2packets = 5*(packet_time * 2 + time_between_packets);
+time5packets = (packet_time * 5 + time_between_packets * 4);
 
 % -------- sampling using SDR --------- %
 
@@ -47,7 +47,7 @@ is_packet = false;
 
 % keep sampling until an entire packet is detcted
 while ~is_packet
-    [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time2packets,N_packet,nfft,Ncp,seq_4);
+    [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time5packets,N_packet,nfft,Ncp,seq_4);
 end
 
 % [is_packet,data,max_idx_sync_time_4,rx,scope] = process_1_channel(fc,fs,time2packets,N_packet,nfft,Ncp,seq_4);
@@ -57,7 +57,7 @@ sync_data = data(max_idx_sync_time_4-3*(nfft+Ncp(1))-Ncp(2):max_idx_sync_time_4+
 % fix freq offset twice cause good
 [fixed_packet,~] = cp_fix_freq(sync_data, Ncp(1),Ncp(2),fs);
 
-[fixed_packet,~] = cp_fix_freq(fixed_packet, Ncp(1),Ncp(2),fs);
+% [fixed_packet,~] = cp_fix_freq(fixed_packet, Ncp(1),Ncp(2),fs);
 
 % Demod the ofdm symbols
 fixed_symbols_mat = ofdm_demod(sync_freq_data, Ncp,Ncp_prime,seq_6,fs);
@@ -96,13 +96,17 @@ function [found_pilot,max_idx_sync_time_4] = find_pilot(data,seq_4)
     
     [max_corr_4,max_idx_sync_time_4] = max(sync_time_4);
 
-    % Calculate the peak to average ratio (PAR)
-    par = (max_corr_4 / mean(abs(data)));
+    % sync_time_4_remove_first_peak = sync_time_4(max_idx_sync_time_4+1:end);
+    % 
+    % [max_corr_2,max_idx_next_peak] = max(sync_time_4_remove_first_peak);
 
-    if abs(par) > length(seq_4)
+    % Calculate the peak to average ratio (PAR)
+    par1 = (max_corr_4 / mean(abs(data)));
+    % par2 = (max_corr_4 / mean(abs(data)));
+
+    if (abs(par1) > length(seq_4))
         found_pilot = 1;
-    end
-    
+    end  
 end
 
 %% Sampling using the SDR
@@ -169,7 +173,7 @@ function [fixed_packet,freq_offset] = cp_fix_freq(packet, Ncp,Ncp_prime,fs)
 
     avg = angle(mean(match(20:50,:),"all"));
 
-    freq_offset = avg*fs/(2*pi*1096);
+    freq_offset = avg*fs/(2*pi*1024);
 
     t = 0:1/fs:length(packet)/fs-1/fs; 
 
