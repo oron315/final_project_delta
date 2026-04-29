@@ -2,19 +2,14 @@ close all
 clear
 clc
 
-%% testing SDR
-
-% fs_1spc = 15.36e6;
-% BW = fs_1spc * 2;
-
-Ncp = [72 80];
-nfft = 1024;
-
+%% ------INPUT DATA------%
 % time known data
 packet_time = 643e-6;
 time_between_packets = 640e-3;
 
-fc_list = 1e9 * [2.3995, 2.4145,2.4295,2.4445,2.4595, 5.7965,5.7765, 5.7565];
+Ncp = [72 80];
+nfft = 1024;
+fc_list = 1e9 * [2.3995, 2.4145,2.4295,2.4445,2.4595];
 
 %% ---------create zadof chu------- %
 Nzc = 601;
@@ -30,7 +25,7 @@ seq_6 = zadof_ofdm(Nzc,root);
 fc = fc_list(3);
 fs = 15.36e6;
 
-% taking 2 packets in time
+% taking 5 packets in time
 time5packets = (packet_time * 5 + time_between_packets * 4);
 
 % -------- sampling using SDR --------- %
@@ -42,18 +37,29 @@ N_packet = (nfft * 9 + Ncp(1) * 7 + Ncp(2) * 2);
 is_packet = false;
 
 % keep sampling until an entire packet is detcted
+fc_next = fc_list(3);
 while ~is_packet
-    [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time5packets,N_packet,nfft,Ncp,seq_4);
+    [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc_next,fs,time_between_packets,nfft,Ncp,seq_4);
+    % frequency hopping because there are 5-20 packets in each freq
+    [fc_next] = hopping_between_freq(is_packet,fc_next, fc_list)
+    message = "i just hopped! :)" 
 end
 
 % taking only the packet from the data
-sync_data = zeros(length(max_idx_sync_time_4),N_packet+1);
-for i = 1:length(max_idx_sync_time_4)
-    sync_data(i,:) = data(max_idx_sync_time_4(i)-3*(nfft+Ncp(1))-Ncp(2):max_idx_sync_time_4(i)+6*nfft+4*Ncp(1)+Ncp(2));
-end
+% each row of sync_data is a different packet
+
+% sync_data = zeros(length(max_idx_sync_time_4),N_packet+1);
+% for i = 1:length(max_idx_sync_time_4)
+%     sync_data(i,:) = data(max_idx_sync_time_4(i)-3*(nfft+Ncp(1))-Ncp(2):max_idx_sync_time_4(i)+6*nfft+4*Ncp(1)+Ncp(2));
+% end
+
+% packet
+sync_data = data(max_idx_sync_time_4-3*(nfft+Ncp(1))-Ncp(2):max_idx_sync_time_4+6*nfft+4*Ncp(1)+Ncp(2));
 
 % fix freq offset twice cause good
-[fixed_packet,~] = cp_fix_freq(sync_data(end,:), Ncp(1),Ncp(2),fs);
+% [fixed_packet,~] = cp_fix_freq(sync_data(end,:), Ncp(1),Ncp(2),fs);
+
+[fixed_packet,~] = cp_fix_freq(sync_data, Ncp(1),Ncp(2),fs);
 
 % Demod the ofdm symbols
 fixed_symbols_mat = ofdm_demod(fixed_packet, Ncp(1),Ncp(2),seq_6,fs);
@@ -141,23 +147,22 @@ d
 geoplot(str2double(d("app_lat")), str2double(d("app_long")), 'r*', 'MarkerSize', 10)
 
 % end of code
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+%% FUNCTIONS
 %% process only one channel
 
-function [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time2packets,N_packet,nfft,Ncp,seq_4)
+function [is_packet,data,max_idx_sync_time_4] = process_1_channel(fc,fs,time,nfft,Ncp,seq_4)
     % gets data of length 2*packet_length 
     % returns boolean of there is a packet there and it is not to late or
     % early
 
-    [data] = capture_samples(fc,fs,time2packets);
+    [data] = capture_samples(fc,fs,time);
     data = data.';
     % data = load('data_2.4295fc_the_best.mat').data;
     % data = data.';
-    
+    % 
     [is_packet,max_idx_sync_time_4] = find_packet(data,seq_4,nfft,Ncp);
 
 end
@@ -165,32 +170,29 @@ end
 %% Finding pilot
 
 function [is_packet,max_corr_idx] = find_packet(data,seq_4,nfft,Ncp)
+    % returns boolean if there is packet in the data and the start index
     
+    % max correlation
+    corr_zc4 = conv(data, flip(conj(seq_4)), "valid");
+    [max_corr_val,max_corr_idx] = maxk(corr_zc4,1);   
     
-    sync_time_4 = conv(data, flip(conj(seq_4)), "valid");
-  
+    % PAPR threshold
+    par = abs((max_corr_val ./ mean(abs(data))));
+    threshold = length(seq_4);
+    threshold = threshold / 2;
 
-    [max_corr_val,max_corr_idx] = maxk(sync_time_4,4);   
-    
-    % Calculate the peak to average ratio (PAR)
-    par = (max_corr_val ./ mean(abs(data)));
-    
-    found_pilot = abs(par) > length(seq_4);
-
+    % threshold is (max_corr_val > mean(abs(data)) * length(seq_4)) / 2
+    found_pilot = par > threshold;
 
     % borders for getting an entire packet of info
     min_idx_4 = (3 * nfft + 3 * Ncp(1) + Ncp(2));
     max_idx_4 = (length(data) - (nfft * 6 + Ncp(1) * 5 + Ncp(2)));
 
     enough_packet_before = max_corr_idx < max_idx_4;
-   
     enough_packet_after = max_corr_idx > min_idx_4;
-
     enough_packet = and(enough_packet_before,enough_packet_after);
 
-
     found_pilot_full = and(found_pilot,enough_packet);
-    
     is_packet = sum(found_pilot_full) > 0;
 
     max_corr_idx = max_corr_idx(found_pilot_full==1); % find the idx the work
@@ -231,7 +233,6 @@ function seq_freq = zadof_ofdm(Nzc,root)
 end
 
 %% correcting frequency offset
-
 function [fixed_packet,freq_offset] = cp_fix_freq(packet, Ncp,Ncp_prime,fs)
    
     nfft = 1024;
@@ -358,10 +359,11 @@ function r_crc = crc(data)
     % decode by 24A (24 last bits are crc)
     
     
-    [~, err] = nrCRCDecode(data,"24A");
-    % err_rate = sum(err)/(length(data) - 24);
-
-    r_crc = data(1:end-24);
+    poly = "z^24 + z^23 + z^18 + z^17 + z^14 + z^11 + z^10 + z^7 + z^6 + z^5 + z^4 + z^3 + z^1 + 1";
+    crc_detector = comm.CRCDetector('Polynomial',poly);
+    [r_crc, crc_err] = crc_detector(data.');
+    r_crc = r_crc.';
+    crc_err
 end
 
 function r_turbo_and_interleaver = turbo_and_interleaver(data)
@@ -512,25 +514,21 @@ end
 
 
 
-%% use later - trying to sample many channel at the same time
+%% use later - TRYING TO HOP BETWEEN FREQUENCIES
+function [fc_next] = hopping_between_freq(is_packet,fc_now, fc_list)
+    % moving to next fc option
+    idx = find(fc_list == fc_now);
 
-% function [fc] = recieve_wideband_signal(data,BW,fs_1spc,fc_now, fc_list)
-% 
-%      % Calculate the correlation peak to average data ratio (PAR)
-%     par = find_is_signal(data,BW,fs_1spc)
-% 
-%     if par > length(seq_4)
-% 
-%         find_bits(data)
-% 
-%     else
-% 
-%         % moving to next fc option
-%         fc_next = fc_list(find(fc_list == fc_now) + 1);
-% 
-%     end
-% 
-% end
+    if ~is_packet
+        if idx == length(fc_list)
+            fc_next = fc_list(1);
+        else
+            fc_next = fc_list(idx + 1);
+        end
+    else
+        fc_next = fc_now;
+    end
+end
 
 
 
