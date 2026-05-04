@@ -31,10 +31,12 @@ f = -fs_start/2:fs_start/length(complex_data):fs_start/2 - fs_start/length(compl
 t = 0:1/fs_start:length(complex_data)/fs_start-1/fs_start;
 
 figure;
-plot(t,complex_data)
+plot(t,abs(complex_data))
 
 figure;
 plot(f,abs(fftshift(fft(complex_data))))
+
+
 
 %% ---------------resample and stating to proccess the data---------------------%
 % new sampling rate
@@ -42,6 +44,7 @@ fs = nfft * scs;
 
 data_upsample = resample(complex_data,fs,fs_start);                  
 data_upsample = data_upsample.';
+
 
 %% ---------create zadof chu------- %
 Nzc = 601;
@@ -63,6 +66,7 @@ sync_time_6 = conv(data_upsample, flip(conj(seq_6)), "valid");
 [~,max_sync_time_6] = max(sync_time_6);
 
 sync_data = data_upsample(max_sync_time_4-3*(nfft+Ncp)-Ncp_prime:max_sync_time_4+6*nfft+4*Ncp+Ncp_prime);
+
 
 figure;
 plot(abs(sync_time_4))
@@ -110,19 +114,21 @@ freq_offset_cp = cp(sync_data,Ncp,Ncp_prime,fs)
 sync_freq_data = sync_data .* exp(-1j*2*pi*(-freq_offset_cp).*t);
 
 
-freq_offset_cp_2 = cp(sync_freq_data,Ncp,Ncp_prime,fs);
+% freq_offset_cp_2 = cp(sync_freq_data,Ncp,Ncp_prime,fs);
+% 
+% sync_freq_data = sync_freq_data .* exp(-1j*2*pi*(-freq_offset_cp_2).*t);
 
-sync_freq_data = sync_freq_data .* exp(-1j*2*pi*(-freq_offset_cp_2).*t);
+spectrogram(sync_data,100,[],[],fs,'centered','yaxis')
 
 %% ---------demod ofdm to QPSK symbols---------- %
 
-ofdm_demod(sync_freq_data, Ncp,Ncp_prime,seq_6,fs);
+fixed_symbols_mat = ofdm_demod(sync_freq_data, Ncp,Ncp_prime,seq_6,fs);
 
 
 %% ----- fix time once more ------%
 t = 0:1/fs:length(data_upsample)/fs-1/fs;
 
-data_fixed_freq = data_upsample .* exp(-1j*2*pi*(-freq_offset_cp).*t).* exp(-1j*2*pi*(-freq_offset_cp_2).*t);
+data_fixed_freq = data_upsample .* exp(-1j*2*pi*(-freq_offset_cp).*t);
 
 sync_time_4 = conv(data_fixed_freq, flip(conj(seq_4)), "valid");
 
@@ -133,7 +139,11 @@ sync_time_6 = conv(data_fixed_freq, flip(conj(seq_6)), "valid");
 
 sync_data = data_fixed_freq(max_sync_time_40-3*(nfft+Ncp)-Ncp_prime:max_sync_time_40+6*nfft+4*Ncp+Ncp_prime);
 
-ofdm_demod(sync_data, Ncp,Ncp_prime,seq_6,fs)
+fixed_symbols_mat = ofdm_demod(sync_data, Ncp,Ncp_prime,seq_6,fs);
+
+M = 4;
+bin_msg = qpsk_demod(fixed_symbols_mat, M);
+
 
 
 %% -----functions------%
@@ -183,7 +193,7 @@ function freq_offset = cp(packet, Ncp,Ncp_prime,fs)
 
     avg = angle(mean(match(20:50,:),"all"));
 
-    freq_offset = avg*fs/(2*pi*1096);
+    freq_offset = avg*fs/(2*pi*1024);
 end
 
 
@@ -233,7 +243,7 @@ function find_freq_with_matrix(pilot_with_margin,zadof,fs)
 end
 
 
-function ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
+function fixed_symbols_mat = ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
     
     % take the sixth symbol from the packet
     nfft =1024;
@@ -271,9 +281,6 @@ function ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
     
     %--------- fixing channel ---------- %
 
-    % H_est = estimate_channel(symbols_mat(:,6),fftshift(fft(zadof)));
-
-
     h = (symbols_mat(:,6) ./ fftshift(fft(zadof)).');
 
     fixed_symbols_mat = symbols_mat ./ repmat(h,1,9);
@@ -281,4 +288,25 @@ function ofdm_demod(sync_freq_data, Ncp,Ncp_prime,zadof,fs)
     figure;
     scatter(real(fixed_symbols_mat(213:813,[2,3,5,7,8,9])),imag(fixed_symbols_mat(213:813,[2,3,5,7,8,9])))
 
+
 end
+
+
+function demodulated_symbols = qpsk_demod(fixed_symbols_mat, M)
+
+        % -----------QPSK demod-----------%
+
+    fixed_symbols = fixed_symbols_mat([213:512,514:813],[2,3,5,7,8,9]);
+
+    fixed_symbols = fixed_symbols(:);
+
+    % Perform QPSK demodulation on the fixed symbols
+    demodulated_symbols = pskdemod(conj(fixed_symbols),M,-pi/4,'gray',OutputType='bit');
+
+    hex_msg = binaryVectorToHex(demodulated_symbols.')
+
+end
+
+
+
+
